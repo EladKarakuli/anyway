@@ -6,13 +6,15 @@ import logging
 from sqlalchemy import Column, Integer, String, Boolean, Float, ForeignKey, DateTime, Text, BigInteger, Index, desc, event
 from sqlalchemy.orm import relationship, load_only
 from flask.ext.sqlalchemy import SQLAlchemy
+from sqlalchemy.schema import Table
 import datetime
 import localization
 import utilities
 from database import Base
 
+
 db_encoding = 'utf-8'
-markerIndexTableName = 'marker_index'
+marker_index_table_name = 'marker_index'
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -139,6 +141,20 @@ class Marker(MarkerMixin, Base): # TODO rename to AccidentMarker
         # >>> m.count()
         # 250
         accurate = not inaccurate
+        import time
+        from database import db_session
+        t0 = time.time()
+
+        markerIndex = Table(marker_index_table_name, Base.metadata)
+
+        result = db_session.query(markerIndex) \
+            .filter(markerIndex.c.longitude <= ne_lng) \
+            .filter(markerIndex.c.longitude >= sw_lng) \
+            .filter(markerIndex.c.latitude <= ne_lat) \
+            .filter(markerIndex.c.latitude >= sw_lat)
+
+        print "count: %d" % result.count()
+
         markers = Marker.query \
             .filter(Marker.longitude <= ne_lng) \
             .filter(Marker.longitude >= sw_lng) \
@@ -159,6 +175,9 @@ class Marker(MarkerMixin, Base): # TODO rename to AccidentMarker
             markers = markers.filter(Marker.severity != 3)
         if is_thin:
             markers = markers.options(load_only("id", "longitude", "latitude"))
+
+        t1 = time.time()
+        print "Time: %.8f Yay!" % (t1-t0)
         return markers
 
     @staticmethod
@@ -175,11 +194,23 @@ class Marker(MarkerMixin, Base): # TODO rename to AccidentMarker
             longitude=data["longitude"]
         )
 
-
+# Keep marker_index table update along marker table respectively
 @event.listens_for(Marker, 'after_insert')
 def receive_after_insert(mapper, connection, target):
-	markerIndex = Table(markerIndexTableName, Baes.metadata)
-	markerIndex.insert().values(id=target.id, longitude=target.longitude, latitude=target.latitude)
+    from database import engine, db_session
+    from sqlalchemy import select, func
+
+    markerIndex = init_marker_index_table(marker_index_table_name, Base.metadata, engine)
+    #connection.execute(markerIndex.insert(), id=target.id, longitude=target.longitude, latitude=target.latitude)
+    #print "pass"
+    receive_after_insert.index += 1
+    print receive_after_insert.index, target.longitude, target.latitude
+    ins = markerIndex.insert().values(id=receive_after_insert.index, longitude=target.longitude, latitude=target.latitude)
+    
+    connection.execute(ins)
+
+    #print db_session.query(markerIndex).count()
+receive_after_insert.index=0
 
 
 class DiscussionMarker(MarkerMixin, Base):
@@ -219,10 +250,10 @@ class Follower(Base):
 
 
 	
-def init_marker_index_table(tableName, metadata, engine)
-	return Table(tableName, metadata, autoload=True, autoload_with=engine)
+def init_marker_index_table(tableName, meta, engine):
+	return Table(tableName, meta, autoload=True, autoload_with=engine)
 
-def updatae_marker_index_table(
+# def update_marker_index_table(
 
 def init_db():
     from database import engine
@@ -233,7 +264,13 @@ def init_db():
 
     print "Creating all tables"
     Base.metadata.create_all(bind=engine)
-	markerIndex = init_marker_index_table(markerIndexTableName, Base.metadata, engine)
+
+    print "Creating marker index table"
+    sql = 'CREATE VIRTUAL TABLE marker_index USING rtree(id, longitude, latitude);'
+    result = engine.execute(sql)
+    print "Marker index created"
+
+    markerIndex = init_marker_index_table(marker_index_table_name, Base.metadata, engine)
 	
 
 

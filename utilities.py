@@ -99,4 +99,4 @@ class ItmToWGS84(object):
         return longitude, latitude
 		
 		
-class ReadFile(object)
+# class ReadFile(object)
