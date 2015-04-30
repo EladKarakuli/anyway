@@ -197,17 +197,30 @@ class Marker(MarkerMixin, Base): # TODO rename to AccidentMarker
 # Keep marker_index table update along marker table respectively
 @event.listens_for(Marker, 'after_insert')
 def receive_after_insert(mapper, connection, target):
-    from database import engine, db_session
-    from sqlalchemy import select, func
+    from database import engine
 
     markerIndex = init_marker_index_table(marker_index_table_name, Base.metadata, engine)
     #connection.execute(markerIndex.insert(), id=target.id, longitude=target.longitude, latitude=target.latitude)
     #print "pass"
     receive_after_insert.index += 1
-    print receive_after_insert.index, target.longitude, target.latitude
-    ins = markerIndex.insert().values(id=receive_after_insert.index, longitude=target.longitude, latitude=target.latitude)
+    newid = int(target.id)
+    print newid
+    print type(target.longitude)
+    print type(target.latitude)
+    print target.id, target.longitude, target.latitude
+    ins = markerIndex.insert().values(id=target.id, longitude=target.longitude, latitude=target.latitude)
     
-    connection.execute(ins)
+    print str(ins)
+    print ins.compile().params
+    trans = connection.begin()
+    #connection.execute(markerIndex.insert(), id=target.id, longitude=target.longitude, latitude=target.latitude)
+    #trans.commit()
+    sql = 'INSERT INTO marker_index (id, longitude, latitude) VALUES({0}, {1}, {2});'.format(
+     target.id, target.longitude, target.latitude)
+    print sql
+    
+    connection.execute(sql)
+    trans.commit()
 
     #print db_session.query(markerIndex).count()
 receive_after_insert.index=0
@@ -266,8 +279,8 @@ def init_db():
     Base.metadata.create_all(bind=engine)
 
     print "Creating marker index table"
-    sql = 'CREATE VIRTUAL TABLE marker_index USING rtree(id, longitude, latitude);'
-    result = engine.execute(sql)
+    sql = 'CREATE VIRTUAL TABLE IF NOT EXISTS marker_index USING rtree(id, longitude, latitude);'
+    engine.execute(sql)
     print "Marker index created"
 
     markerIndex = init_marker_index_table(marker_index_table_name, Base.metadata, engine)
