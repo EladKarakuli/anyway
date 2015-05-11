@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import json
 import logging
+import os
 
 from sqlalchemy import Column, Integer, String, Boolean, Float, ForeignKey, DateTime, Text, BigInteger, Index, desc, event
 from sqlalchemy.orm import relationship, load_only
@@ -9,12 +10,14 @@ from flask.ext.sqlalchemy import SQLAlchemy
 from sqlalchemy.schema import Table
 import datetime
 import localization
-import utilities
+from utilities import File
 from database import Base
 
 
 db_encoding = 'utf-8'
 marker_index_table_name = 'marker_index'
+
+build_index_sql_file = os.path.join('./static/data/sql/buildrtreeindex.sql')
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -141,25 +144,18 @@ class Marker(MarkerMixin, Base): # TODO rename to AccidentMarker
         # >>> m.count()
         # 250
         accurate = not inaccurate
-        import time
-        from database import db_session
-        t0 = time.time()
+        from database import db_session, engine
 
-        markerIndex = Table(marker_index_table_name, Base.metadata)
-
-        result = db_session.query(markerIndex) \
-            .filter(markerIndex.c.longitude <= ne_lng) \
-            .filter(markerIndex.c.longitude >= sw_lng) \
-            .filter(markerIndex.c.latitude <= ne_lat) \
-            .filter(markerIndex.c.latitude >= sw_lat)
-
-        print "count: %d" % result.count()
+        # Get the ids from the R*Tree index of markers
+        markerIndex = Table(marker_index_table_name, Base.metadata, autoload=True, autoload_with=engine)
+        result = db_session.query(markerIndex).with_entities(markerIndex.c.id) \
+            .filter(markerIndex.c.minLng <= ne_lng) \
+            .filter(markerIndex.c.maxLng >= sw_lng) \
+            .filter(markerIndex.c.minLat <= ne_lat) \
+            .filter(markerIndex.c.maxLat >= sw_lat)
 
         markers = Marker.query \
-            .filter(Marker.longitude <= ne_lng) \
-            .filter(Marker.longitude >= sw_lng) \
-            .filter(Marker.latitude <= ne_lat) \
-            .filter(Marker.latitude >= sw_lat) \
+            .filter(Marker.id.in_(result)) \
             .filter(Marker.created >= start_date) \
             .filter(Marker.created < end_date) \
             .order_by(desc(Marker.created))
@@ -176,8 +172,6 @@ class Marker(MarkerMixin, Base): # TODO rename to AccidentMarker
         if is_thin:
             markers = markers.options(load_only("id", "longitude", "latitude"))
 
-        t1 = time.time()
-        print "Time: %.8f Yay!" % (t1-t0)
         return markers
 
     @staticmethod
@@ -200,31 +194,11 @@ def receive_after_insert(mapper, connection, target):
     from database import engine
 
     markerIndex = init_marker_index_table(marker_index_table_name, Base.metadata, engine)
-    #connection.execute(markerIndex.insert(), id=target.id, longitude=target.longitude, latitude=target.latitude)
-    #print "pass"
-    receive_after_insert.index += 1
-    newid = int(target.id)
-    print newid
-    print type(target.longitude)
-    print type(target.latitude)
-    print target.id, target.longitude, target.latitude
-    ins = markerIndex.insert().values(id=target.id, longitude=target.longitude, latitude=target.latitude)
+    ins = markerIndex.insert().values(id=target.id, minLng=target.longitude, maxLng=target.longitude, minLat=target.latitude, maxLat=target.latitude)
     
-    print str(ins)
-    print ins.compile().params
     trans = connection.begin()
-    #connection.execute(markerIndex.insert(), id=target.id, longitude=target.longitude, latitude=target.latitude)
-    #trans.commit()
-    sql = 'INSERT INTO marker_index (id, longitude, latitude) VALUES({0}, {1}, {2});'.format(
-     target.id, target.longitude, target.latitude)
-    print sql
-    
-    connection.execute(sql)
+    connection.execute(ins)
     trans.commit()
-
-    #print db_session.query(markerIndex).count()
-receive_after_insert.index=0
-
 
 class DiscussionMarker(MarkerMixin, Base):
     __tablename__ = "discussions"
@@ -261,12 +235,8 @@ class Follower(Base):
     marker = Column(BigInteger, ForeignKey("discussions.id"), primary_key=True)
 	
 
-
-	
 def init_marker_index_table(tableName, meta, engine):
 	return Table(tableName, meta, autoload=True, autoload_with=engine)
-
-# def update_marker_index_table(
 
 def init_db():
     from database import engine
@@ -279,12 +249,8 @@ def init_db():
     Base.metadata.create_all(bind=engine)
 
     print "Creating marker index table"
-    sql = 'CREATE VIRTUAL TABLE IF NOT EXISTS marker_index USING rtree(id, longitude, latitude);'
-    engine.execute(sql)
-    print "Marker index created"
-
-    markerIndex = init_marker_index_table(marker_index_table_name, Base.metadata, engine)
-	
+    sql = File.read(build_index_sql_file)
+    engine.execute(sql)	
 
 
 

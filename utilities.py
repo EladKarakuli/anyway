@@ -99,4 +99,9 @@ class ItmToWGS84(object):
         return longitude, latitude
 		
 		
-# class ReadFile(object)
+class File(object):
+    @staticmethod
+    def read(filename):
+        with open(filename) as file:
+            data = file.read()
+            return data
